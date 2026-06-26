@@ -1,0 +1,154 @@
+    <!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Killer Mortal — 3D Table</title>
+    <link rel="stylesheet" href="/new/new.css?v=40">
+</head>
+<body>
+    <main id="stage" aria-label="A green automatic mahjong table">
+        <canvas id="table-canvas" width="1600" height="800"></canvas>
+        <canvas id="decal-canvas" width="1600" height="800" aria-hidden="true"></canvas>
+        <canvas id="compass-canvas" width="900" height="900" aria-hidden="true"></canvas>
+        <section id="begin-overlay" class="begin-overlay" aria-label="Start review">
+            <button id="begin-button" class="begin-button" type="button" autofocus>Begin</button>
+        </section>
+        <section id="dora-indicators" class="dora-card" aria-label="Dora indicators"></section>
+        <section id="hero-tile-prototype" aria-label="Hero concealed hand">
+            <div id="hero-hand" class="hero-hand"></div>
+        </section>
+        <section class="seat-markers" aria-label="Seat markers">
+            <div class="seat-marker seat-marker--shimocha" aria-label="Shimocha">
+                <span class="seat-marker__hex" aria-hidden="true"></span>
+                <span class="seat-marker__label">Shimocha</span>
+            </div>
+            <div class="seat-marker seat-marker--toimen" aria-label="Toimen">
+                <span class="seat-marker__hex" aria-hidden="true"></span>
+                <span class="seat-marker__label">Toimen</span>
+            </div>
+            <div class="seat-marker seat-marker--kamicha" aria-label="Kamicha">
+                <span class="seat-marker__hex" aria-hidden="true"></span>
+                <span class="seat-marker__label">Kamicha</span>
+            </div>
+        </section>
+        <div class="user-nav-dock">
+            <div class="seat-marker seat-marker--hero" aria-label="Hero">
+                <span class="seat-marker__hex" aria-hidden="true"></span>
+                <span class="seat-marker__label seat-marker__label--hero">
+                    <span class="seat-marker__name">Hero</span>
+                    <span id="hero-seat-overall-grade" class="seat-marker__score">Overall: -</span>
+                    <span id="hero-seat-round-grade" class="seat-marker__score">Round: -</span>
+                </span>
+            </div>
+            <nav class="user-nav" aria-label="Review navigation">
+                <div class="user-nav__group" role="group" aria-label="Round navigation">
+                    <button id="nav-previous-round" class="user-nav__button user-nav__button--previous" type="button" aria-label="Previous round"></button>
+                    <output id="nav-round-label" class="user-nav__label" aria-live="polite">East 1 R0</output>
+                    <button id="nav-next-round" class="user-nav__button user-nav__button--next" type="button" aria-label="Next round"></button>
+                </div>
+                <div class="user-nav__group" role="group" aria-label="Decision navigation">
+                    <button id="nav-previous-turn" class="user-nav__button user-nav__button--previous" type="button" aria-label="Previous decision"></button>
+                    <output id="nav-turn-label" class="user-nav__label" aria-live="polite">Decision 0 / 0</output>
+                    <button id="nav-next-turn" class="user-nav__button user-nav__button--next" type="button" aria-label="Next decision"></button>
+                </div>
+                <div class="user-nav__group user-nav__group--compact" role="group" aria-label="AI review navigation">
+                    <button id="nav-previous-ai-review" class="user-nav__button user-nav__button--previous" type="button" aria-label="Previous AI review item"></button>
+                    <button id="ai-review-settings-toggle" class="user-nav__icon" type="button" aria-label="AI review settings" aria-expanded="false" aria-controls="ai-review-settings"></button>
+                    <button id="nav-next-ai-review" class="user-nav__button user-nav__button--next" type="button" aria-label="Next AI review item"></button>
+                </div>
+                <div class="user-nav__tools" role="group" aria-label="Tools">
+                    <button id="app-settings-toggle" class="user-nav__tool" type="button" aria-label="Settings" aria-expanded="false" aria-controls="app-settings">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path stroke="none" d="M0 0h24v24H0z" fill="none" /><path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065" /><path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" /></svg>
+                    </button>
+                    <button class="user-nav__tool" type="button" aria-label="AI help">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path stroke="none" d="M0 0h24v24H0z" fill="none" /><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0" /><path d="M12 9h.01" /><path d="M11 12h1v4h1" /></svg>
+                    </button>
+                </div>
+            </nav>
+            <section id="action-decision" class="action-decision" aria-live="polite" hidden>
+                <div id="action-decision-options" class="action-decision__options"></div>
+            </section>
+            <form id="ai-review-settings" class="ai-review-settings" aria-label="AI review settings" hidden>
+                <label class="ai-review-settings__field" for="setting-dealin-mode">
+                    <span>Deal-In Chance</span>
+                    <select id="setting-dealin-mode">
+                        <option value="none">None</option>
+                        <option value="hover" selected>On Hover</option>
+                        <option value="always">Always</option>
+                    </select>
+                </label>
+                <label class="ai-review-settings__field" for="setting-ai-score-mode">
+                    <span>Mortal Score</span>
+                    <select id="setting-ai-score-mode">
+                        <option value="none">None</option>
+                        <option value="hover">On Hover</option>
+                        <option value="always" selected>Always</option>
+                    </select>
+                </label>
+                <label class="ai-review-settings__field" for="setting-max-ai-suggestions">
+                    <span>Max Suggestions</span>
+                    <input id="setting-max-ai-suggestions" type="number" min="1" max="14" step="1" value="4">
+                </label>
+                <label class="ai-review-settings__field" for="setting-diff-tolerance">
+                    <span>Mortal-Player Diff</span>
+                    <input id="setting-diff-tolerance" type="number" min="0" max="100" step="1" value="5">
+                </label>
+            </form>
+            <form id="app-settings" class="ai-review-settings app-settings" aria-label="Settings" hidden>
+                <label class="ai-review-settings__field app-settings__field" for="setting-sfx-volume">
+                    <span>Volume</span>
+                    <span class="app-settings__volume-control">
+                        <input id="setting-sfx-volume" type="range" min="0" max="100" step="1" value="80">
+                        <output id="setting-sfx-volume-value" for="setting-sfx-volume">80</output>
+                    </span>
+                </label>
+            </form>
+        </div>
+        <section id="round-result-overlay" class="round-result-overlay" aria-live="polite" hidden>
+            <article class="round-result-panel" role="dialog" aria-modal="true" aria-label="End of round result">
+                <header class="round-result-header">
+                    <h2 id="round-result-title" class="round-result-title">Round End</h2>
+                    <button id="round-result-close" class="round-result-close" type="button" aria-label="Close round result"></button>
+                </header>
+                <div id="round-result-ranking" class="round-result-ranking"></div>
+                <div id="round-result-details" class="round-result-details"></div>
+            </article>
+        </section>
+        <aside class="tuning-panel" aria-label="Camera tuning control">
+            <label for="camera-zoom">
+                <span>Camera zoom</span>
+                <output id="camera-zoom-value" for="camera-zoom">88%</output>
+            </label>
+            <input id="camera-zoom" type="range" min="40" max="250" value="88" step="1">
+            <label for="camera-angle">
+                <span>Camera theta</span>
+                <output id="camera-angle-value" for="camera-angle">37&deg;</output>
+            </label>
+            <input id="camera-angle" type="range" min="0" max="360" value="37" step="1">
+            <label for="table-world-z">
+                <span>Table world Z</span>
+                <output id="table-world-z-value" for="table-world-z">6.6</output>
+            </label>
+            <input id="table-world-z" type="range" min="-10" max="20" value="6.6" step="0.1">
+            <div class="round-control" role="group" aria-label="Round navigation">
+                <button id="previous-round" type="button" aria-label="Previous round">‹</button>
+                <output id="round-position" aria-live="polite">1 / 1</output>
+                <button id="next-round" type="button" aria-label="Next round">›</button>
+            </div>
+            <div class="control-caption">Round</div>
+            <div class="round-control turn-control" role="group" aria-label="Turn navigation">
+                <button id="previous-turn" type="button" aria-label="Previous turn">‹</button>
+                <output id="turn-position" aria-live="polite">0 / 0</output>
+                <button id="next-turn" type="button" aria-label="Next turn">›</button>
+            </div>
+            <div class="control-caption">Turn</div>
+            <label class="toggle-row" for="top-view">
+                <span>Top view</span>
+                <input id="top-view" type="checkbox">
+            </label>
+        </aside>
+    </main>
+    <script type="module" src="/new/engine.js?v=58"></script>
+</body>
+</html>
