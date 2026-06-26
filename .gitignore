@@ -6,3 +6,9 @@
 !standalone/**
 !functions/
 !functions/**
+!media/
+!media/mortal_logo_simple.svg
+!media/textures/
+!media/textures/**
+!media/sfx/
+!media/sfx/**
