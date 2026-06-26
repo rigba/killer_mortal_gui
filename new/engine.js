@@ -2802,16 +2802,36 @@ function syncReviewSettingsFromInputs() {
     render();
 }
 
+function resolveReplaySource(file) {
+    const source = file.trim();
+    const isAbsoluteHttpUrl = /^https?:\/\//i.test(source);
+
+    if (isAbsoluteHttpUrl) {
+        const url = new URL(source);
+        if (
+            url.hostname === 'mjai.ekyu.moe'
+            && url.pathname.startsWith('/report/')
+            && url.origin !== location.origin
+        ) {
+            return new URL(`/api/report?url=${encodeURIComponent(url.href)}`, location.origin);
+        }
+        return url;
+    }
+
+    if (source.startsWith('/api/')) {
+        return new URL(source, location.origin);
+    }
+
+    // Replay files are served from the app root while this view lives in /new/.
+    const replayName = source.split(/[\\/]/).pop();
+    return new URL(`/${encodeURIComponent(replayName)}`, location.origin);
+}
+
 async function loadRound() {
     const file = new URLSearchParams(location.search).get('data');
     if (!file) return;
     try {
-        // Replay files are served from the app root while this view lives in /new/.
-        const replayName = file.split(/[\\/]/).pop();
-        const response = await fetch(
-            new URL(`/${encodeURIComponent(replayName)}`, location.origin),
-            { cache: 'no-store' },
-        );
+        const response = await fetch(resolveReplaySource(file), { cache: 'no-store' });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         if (Number.isInteger(data.player_id) && data.player_id >= 0 && data.player_id < 4) {

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Killer Mortal 3D</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/media/favicon-32x32.png">
+    <link rel="stylesheet" href="/standalone/site.css">
+</head>
+<body>
+    <main class="shell" aria-labelledby="page-title">
+        <section class="launcher" aria-label="Open review">
+            <div class="brand-row">
+                <img class="brand-mark" src="/media/killerducky.png" alt="">
+                <div>
+                    <h1 id="page-title">Killer Mortal 3D</h1>
+                    <p>MJAI review URL</p>
+                </div>
+            </div>
+
+            <form id="review-form" class="review-form" novalidate>
+                <label class="field-label" for="review-url">Review URL</label>
+                <div class="input-row">
+                    <input
+                        id="review-url"
+                        name="review-url"
+                        type="url"
+                        inputmode="url"
+                        autocomplete="url"
+                        spellcheck="false"
+                        placeholder="https://mjai.ekyu.moe/killerducky/?data=/report/52cad5a44a819221.json"
+                        required
+                    >
+                    <button type="submit" aria-label="Open 3D review">
+                        <span aria-hidden="true">Open</span>
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M5 12h14m-6-6 6 6-6 6"></path>
+                        </svg>
+                    </button>
+                </div>
+                <p id="form-message" class="form-message" role="status" aria-live="polite"></p>
+            </form>
+        </section>
+
+        <section class="tile-strip" aria-label="Mahjong tiles">
+            <img src="/media/Regular_shortnames/1m.svg" alt="">
+            <img src="/media/Regular_shortnames/9m.svg" alt="">
+            <img src="/media/Regular_shortnames/5p.svg" alt="">
+            <img src="/media/Regular_shortnames/0s.svg" alt="">
+            <img src="/media/Regular_shortnames/1z.svg" alt="">
+            <img src="/media/Regular_shortnames/5z.svg" alt="">
+            <img src="/media/Regular_shortnames/7z.svg" alt="">
+        </section>
+    </main>
+
+    <script type="module" src="/standalone/site.js"></script>
+</body>
+</html>
