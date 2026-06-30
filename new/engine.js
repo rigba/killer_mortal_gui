@@ -1761,13 +1761,17 @@ function actionSuggestionLabel(action, hasReachOption) {
     return actionLabel(action);
 }
 
-function tileSuggestions(entry) {
+function tileSuggestions(entry, { riichiDiscardTile = null } = {}) {
     const suggestions = [];
     const hasReachOption = entry?.details?.some(detail => detail.action?.type === 'reach') || false;
     for (const detail of entry?.details || []) {
         const action = detail.action;
         if (!['dahai', 'reach', 'none'].includes(action?.type) || !Number.isFinite(detail.prob)) continue;
-        const tile = action.type === 'dahai' ? action.pai : entry.tile;
+        const tile = action.type === 'dahai'
+            ? action.pai
+            : action.type === 'reach'
+                ? riichiDiscardTile || entry.tile
+                : entry.tile;
         if (!tile) continue;
         suggestions.push({
             type: action.type,
@@ -1832,6 +1836,16 @@ function matchingDecisionIndex(entries, event, remainingTiles) {
         && sameTileKind(entry.tile, event.pai)
         && (!Number.isFinite(entry.tiles_left) || entry.tiles_left === remainingTiles)
     ));
+}
+
+function nextSelfDiscardTile(events, eventIndex, actor) {
+    const nextEvent = events[eventIndex + 1];
+    if (nextEvent?.type === 'dahai' && nextEvent.actor === actor) return nextEvent.pai;
+    if (nextEvent?.type !== 'reach' || nextEvent.actor !== actor) return null;
+    const discardEvent = events[eventIndex + 2];
+    return discardEvent?.type === 'dahai' && discardEvent.actor === actor
+        ? discardEvent.pai
+        : null;
 }
 
 function canCallCreateHeroDiscardDecision(event) {
@@ -2018,7 +2032,11 @@ function buildTurnStates(startEvent, events, reviewEntries = []) {
                 : -1;
             if (tileSuggestionDecisionIndex >= 0) {
                 const [entry] = pendingTileSuggestionDecisions.splice(tileSuggestionDecisionIndex, 1);
-                decisionState.aiSuggestions = tileSuggestions(entry);
+                decisionState.aiSuggestions = tileSuggestions(entry, {
+                    riichiDiscardTile: event.type === 'tsumo'
+                        ? nextSelfDiscardTile(events, eventIndex, event.actor)
+                        : event.pai,
+                });
                 decisionState.aiReviewKey = reviewEntryKey(entry);
                 decisionState.aiReviewGrade = reviewEntryGradeStats(entry);
             }
