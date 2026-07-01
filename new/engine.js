@@ -15,6 +15,8 @@ const compassCanvas = document.querySelector('#compass-canvas');
 const compassContext = compassCanvas.getContext('2d');
 const beginOverlay = document.querySelector('#begin-overlay');
 const beginButton = document.querySelector('#begin-button');
+const helpOverlay = document.querySelector('#help-overlay');
+const helpOverlayToggle = document.querySelector('#help-overlay-toggle');
 const doraIndicatorsElement = document.querySelector('#dora-indicators');
 const zoomInput = document.querySelector('#camera-zoom');
 const zoomOutput = document.querySelector('#camera-zoom-value');
@@ -3085,18 +3087,47 @@ function closeAppSettings() {
     appSettingsToggle.setAttribute('aria-expanded', 'false');
 }
 
+function closeHelpOverlay() {
+    helpOverlay.hidden = true;
+    helpOverlayToggle.setAttribute('aria-expanded', 'false');
+}
+
 function toggleAiReviewSettings() {
     const nextOpen = aiReviewSettings.hidden;
-    if (nextOpen) closeAppSettings();
+    if (nextOpen) {
+        closeAppSettings();
+        closeHelpOverlay();
+    }
     aiReviewSettings.hidden = !nextOpen;
     aiReviewSettingsToggle.setAttribute('aria-expanded', String(nextOpen));
 }
 
 function toggleAppSettings() {
     const nextOpen = appSettings.hidden;
-    if (nextOpen) closeAiReviewSettings();
+    if (nextOpen) {
+        closeAiReviewSettings();
+        closeHelpOverlay();
+    }
     appSettings.hidden = !nextOpen;
     appSettingsToggle.setAttribute('aria-expanded', String(nextOpen));
+}
+
+function toggleHelpOverlay() {
+    const nextOpen = helpOverlay.hidden;
+    if (nextOpen) {
+        closeAiReviewSettings();
+        closeAppSettings();
+    }
+    helpOverlay.hidden = !nextOpen;
+    helpOverlayToggle.setAttribute('aria-expanded', String(nextOpen));
+}
+
+function consumeHelpOverlayInteraction(event) {
+    if (helpOverlay.hidden) return false;
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    closeHelpOverlay();
+    return true;
 }
 
 function syncSfxVolumeFromInput({ persist = true } = {}) {
@@ -3600,6 +3631,13 @@ appSettingsToggle.addEventListener('click', event => {
 appSettings.addEventListener('click', event => {
     event.stopPropagation();
 });
+helpOverlayToggle.addEventListener('click', event => {
+    event.stopPropagation();
+    toggleHelpOverlay();
+});
+helpOverlay.addEventListener('click', event => {
+    consumeHelpOverlayInteraction(event);
+});
 dealInModeSelect.addEventListener('change', syncReviewSettingsFromInputs);
 aiScoreModeSelect.addEventListener('change', syncReviewSettingsFromInputs);
 maxAiSuggestionsInput.addEventListener('change', syncReviewSettingsFromInputs);
@@ -3643,10 +3681,12 @@ document.addEventListener('keydown', event => {
     }
 
     if (event.key === 'Escape') {
+        if (!helpOverlay.hidden) closeHelpOverlay();
         if (!aiReviewSettings.hidden) closeAiReviewSettings();
         if (!appSettings.hidden) closeAppSettings();
         return;
     }
+    if (consumeHelpOverlayInteraction(event)) return;
     if (isEditableKeyboardTarget(event.target)) return;
 
     if (event.key === 'ArrowRight') {
@@ -3665,6 +3705,11 @@ document.addEventListener('keydown', event => {
 });
 document.addEventListener('wheel', event => {
     if (event.deltaY === 0) return;
+    if (!helpOverlay.hidden) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+    }
     if (roundResultVisible || roundResultPending) {
         event.preventDefault();
         event.stopPropagation();

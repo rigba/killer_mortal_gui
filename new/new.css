@@ -89,6 +89,27 @@ body {
     pointer-events: none;
 }
 
+.help-overlay {
+    position: absolute;
+    z-index: 30;
+    inset: 0;
+    display: block;
+    background: rgb(0 0 0 / 18%);
+    cursor: pointer;
+}
+
+.help-overlay[hidden] {
+    display: none;
+}
+
+.help-overlay__image {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    pointer-events: none;
+}
+
 .dora-card {
     --dora-card-scale: .75;
     --dora-card-inset: 32px;
