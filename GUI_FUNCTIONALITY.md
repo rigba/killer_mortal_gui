@@ -53,8 +53,8 @@ This is the parity checklist for rebuilding the GUI. It documents user-visible b
 
 | Key | Action |
 | --- | --- |
-| `←` / `→` | Previous / next event |
-| `↑` / `↓` | Previous / next reviewed decision |
+| `Left` / `Right` | Previous / next reviewed decision |
+| `Down` / `Up` | Previous / next AI decision diff |
 | `PageUp` or `,` | Previous mismatch |
 | `PageDown` or `.` | Next mismatch |
 | `Home` or `[` | Start of round; previous round if already at start |

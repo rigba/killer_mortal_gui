@@ -47,6 +47,8 @@ const maxAiSuggestionsInput = document.querySelector('#setting-max-ai-suggestion
 const diffToleranceInput = document.querySelector('#setting-diff-tolerance');
 const sfxVolumeInput = document.querySelector('#setting-sfx-volume');
 const sfxVolumeOutput = document.querySelector('#setting-sfx-volume-value');
+const navigationReplayDelayInput = document.querySelector('#setting-navigation-replay-delay');
+const navigationReplayDelayOutput = document.querySelector('#setting-navigation-replay-delay-value');
 const userNavDock = document.querySelector('.user-nav-dock');
 const seatMarkers = document.querySelector('.seat-markers');
 const heroSeatRoundGrade = document.querySelector('#hero-seat-round-grade');
@@ -65,6 +67,9 @@ const MAX_AI_SUGGESTIONS_LIMIT = 14;
 const ROUND_RESULT_DELAY_MS = 250;
 const DEFAULT_SFX_VOLUME = 50;
 const SFX_VOLUME_STORAGE_KEY = 'killer-mortal-sfx-volume';
+const DEFAULT_NAVIGATION_REPLAY_DELAY_MS = 0;
+const MAX_NAVIGATION_REPLAY_DELAY_MS = 250;
+const NAVIGATION_REPLAY_DELAY_STORAGE_KEY = 'killer-mortal-navigation-replay-delay';
 const ENGINE_DEBUG_VERSION = 'grade-full-details-v58';
 const GRADE_DEBUG = false;
 const SFX_SOURCES = {
@@ -89,7 +94,10 @@ let maxAiSuggestions = 4;
 let dealInMode = 'hover';
 let aiScoreMode = 'always';
 let sfxVolume = storedSfxVolume();
+let navigationReplayDelay = storedNavigationReplayDelay();
 let selectedTurnIdentity = '0:0';
+let navigationReplayTimer = null;
+let navigationReplayToken = 0;
 let roundResultTimer = null;
 let roundResultVisible = false;
 let roundResultPending = false;
@@ -475,6 +483,11 @@ const TILE_CODE_NAMES = {
     46: 'F',
     47: 'C',
 };
+const TILE_FACE_ASSET_NAMES = [
+    ...['m', 'p', 's'].flatMap(suit => ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'].map(number => `${number}${suit}`)),
+    '1z', '2z', '3z', '4z', '5z', '6z', '7z',
+];
+const preloadedTileFaceImages = [];
 let renderedHeroHandKey = '';
 let hoveredHeroTileKind = null;
 
@@ -488,6 +501,17 @@ function tileAssetName(tile) {
 
 function tileKind(tile) {
     return typeof tile === 'string' ? tile.replace(/r$/, '') : '';
+}
+
+function preloadTileFaceImages() {
+    if (preloadedTileFaceImages.length) return;
+    for (const assetName of TILE_FACE_ASSET_NAMES) {
+        const image = new Image();
+        image.loading = 'eager';
+        image.decoding = 'sync';
+        image.src = `/media/Regular_shortnames/${assetName}.svg`;
+        preloadedTileFaceImages.push(image);
+    }
 }
 
 const discardLayer = createDiscardLayer();
@@ -647,6 +671,15 @@ function rebuildVisibleTileNodes() {
                         wz: MELD_BASE_Z + meldLayer.position.z + TILE_DEPTH * TILE_SIZE_SCALE,
                     });
                 }
+                if (item.frontTile) {
+                    const frontPosition = frontMeldTilePosition([px, py, MELD_BASE_Z], basis.rotation);
+                    visibleTileNodes.push({
+                        kind: tileKind(item.frontTile),
+                        wx: frontPosition[0] + meldLayer.position.x,
+                        wy: frontPosition[1] + meldLayer.position.y,
+                        wz: MELD_BASE_Z + meldLayer.position.z + TILE_DEPTH * TILE_SIZE_SCALE,
+                    });
+                }
                 cursor += width + MELD_TILE_GAP;
             });
             cursor += MELD_GROUP_GAP - MELD_TILE_GAP;
@@ -774,7 +807,7 @@ const MELD_RIGHT_CORNER_DISTANCE = 4;
 const MELD_TILE_GAP = .018;
 const MELD_GROUP_GAP = 0.1;
 const MELD_BASE_Z = .17;
-const MELD_STACK_GAP = .012;
+const MELD_FRONT_TILE_OFFSET = (.423 + MELD_TILE_GAP) * TILE_SIZE_SCALE;
 
 function cloneMelds(melds) {
     return melds.map(playerMelds => playerMelds.map(meld => ({
@@ -814,6 +847,22 @@ function calledTileIndexFromRight(meld, tileCount) {
     return tileCount - 1; // Player on the caller's left (also every chi).
 }
 
+function meldForwardOffset(rotation, distance = MELD_FRONT_TILE_OFFSET) {
+    return [
+        -Math.sin(rotation) * distance,
+        Math.cos(rotation) * distance,
+    ];
+}
+
+function frontMeldTilePosition(position, rotation) {
+    const offset = meldForwardOffset(rotation);
+    return [
+        position[0] + offset[0],
+        position[1] + offset[1],
+        MELD_BASE_Z,
+    ];
+}
+
 function meldTiles(meld) {
     if (meld.type === 'ankan') {
         const tiles = [...(meld.consumed || [])];
@@ -836,10 +885,7 @@ function meldTiles(meld) {
             : { tile: concealed.shift() || meld.pai, rotated: false, faceDown: false });
     }
     if (meld.type === 'kakan') {
-        return result.slice(0, 3).map((item, index) => ({
-            ...item,
-            stackedTile: index === calledIndex ? (meld.addedPai || meld.pai) : null,
-        }));
+        result[calledIndex].frontTile = meld.addedPai || meld.pai;
     }
     return result;
 }
@@ -881,14 +927,10 @@ function renderMelds() {
                     darkened: !item.faceDown && tileKind(item.tile) === hoveredHeroTileKind,
                 });
 
-                if (item.stackedTile) {
-                    createTile(meldLayer, item.stackedTile, [
-                        position[0],
-                        position[1],
-                        MELD_BASE_Z + TILE_DEPTH * TILE_SIZE_SCALE + MELD_STACK_GAP,
-                    ], {
+                if (item.frontTile) {
+                    createTile(meldLayer, item.frontTile, frontMeldTilePosition(position, basis.rotation), {
                         rotation,
-                        darkened: tileKind(item.stackedTile) === hoveredHeroTileKind,
+                        darkened: tileKind(item.frontTile) === hoveredHeroTileKind,
                     });
                 }
                 cursor += width + MELD_TILE_GAP;
@@ -1034,13 +1076,26 @@ function createHeroDecisionMarker(label) {
     return marker;
 }
 
-function createHudTile(tile, extraClass = '', suggestions = [], dealInRates = [], heroDecisionLabel = '') {
-    const tileElement = document.createElement('div');
+function hudTileRenderKey(tile, extraClass = '', suggestions = [], dealInRates = [], heroDecisionLabel = '') {
+    const suggestionKey = suggestions
+        .map(suggestion => `${suggestion.rank}:${suggestion.type}:${suggestion.tile}:${suggestion.probability}:${suggestion.label}`)
+        .join(',');
+    const dealInKey = dealInRates
+        .map(dealInRate => `${dealInRate.actor}:${dealInRate.rate}`)
+        .join(',');
+    return `${tile}|${extraClass}|${heroDecisionLabel}|${suggestionKey}|${dealInKey}`;
+}
+
+function hudTileStableKey(tile, extraClass = '') {
+    return `${tile}|${extraClass}`;
+}
+
+function hudTileClassName(extraClass, suggestions, dealInRates, heroDecisionLabel) {
     const hasSuggestions = suggestions.length > 0;
     const hasBestSuggestion = suggestions.some(suggestion => suggestion.rank === 0);
     const hasDealInRates = dealInRates.length > 0;
     const hasHeroDecision = Boolean(heroDecisionLabel);
-    tileElement.className = [
+    return [
         'hud-tile',
         extraClass,
         hasSuggestions ? 'hud-tile--suggested' : '',
@@ -1048,10 +1103,51 @@ function createHudTile(tile, extraClass = '', suggestions = [], dealInRates = []
         hasDealInRates ? 'hud-tile--has-dealin' : '',
         hasHeroDecision ? 'hud-tile--hero-decision' : '',
     ].filter(Boolean).join(' ');
+}
+
+function syncHudTileElement(tileElement, tile, extraClass = '', suggestions = [], dealInRates = [], heroDecisionLabel = '') {
+    const renderKey = hudTileRenderKey(tile, extraClass, suggestions, dealInRates, heroDecisionLabel);
+    if (tileElement.dataset.renderKey === renderKey) return tileElement;
+
+    tileElement.className = hudTileClassName(extraClass, suggestions, dealInRates, heroDecisionLabel);
+    tileElement.dataset.tileKind = tileKind(tile);
+    tileElement.dataset.stableKey = hudTileStableKey(tile, extraClass);
+    tileElement.dataset.renderKey = renderKey;
+    tileElement.setAttribute('aria-label', heroDecisionLabel ? `${tile}, ${heroDecisionLabel}` : tile);
+    if (dealInRates.length) {
+        tileElement.style.setProperty('--dealin-outline-color', bottomDealInCapColor(dealInRates));
+    } else {
+        tileElement.style.removeProperty('--dealin-outline-color');
+    }
+
+    tileElement.querySelector('.hud-tile__suggestions')?.replaceChildren(
+        ...suggestions.map(createSuggestionCap),
+        ...dealInRates.map(createDealInCap),
+    );
+
+    const marker = tileElement.querySelector('.hud-tile__hero-decision');
+    if (heroDecisionLabel) {
+        if (marker) {
+            marker.textContent = heroDecisionLabel;
+        } else {
+            tileElement.append(createHeroDecisionMarker(heroDecisionLabel));
+        }
+    } else {
+        marker?.remove();
+    }
+    return tileElement;
+}
+
+function createHudTile(tile, extraClass = '', suggestions = [], dealInRates = [], heroDecisionLabel = '') {
+    const tileElement = document.createElement('div');
+    const hasDealInRates = dealInRates.length > 0;
+    tileElement.className = hudTileClassName(extraClass, suggestions, dealInRates, heroDecisionLabel);
     if (hasDealInRates) {
         tileElement.style.setProperty('--dealin-outline-color', bottomDealInCapColor(dealInRates));
     }
     tileElement.dataset.tileKind = tileKind(tile);
+    tileElement.dataset.stableKey = hudTileStableKey(tile, extraClass);
+    tileElement.dataset.renderKey = hudTileRenderKey(tile, extraClass, suggestions, dealInRates, heroDecisionLabel);
     tileElement.setAttribute('role', 'img');
     tileElement.setAttribute('aria-label', tile);
 
@@ -1072,15 +1168,67 @@ function createHudTile(tile, extraClass = '', suggestions = [], dealInRates = []
     const face = document.createElement('div');
     face.className = 'hud-tile__face';
     const image = document.createElement('img');
+    image.loading = 'eager';
+    image.decoding = 'sync';
     image.src = `/media/Regular_shortnames/${tileAssetName(tile)}.svg`;
     image.alt = tile;
     face.append(image);
     tileElement.append(suggestionStack, cap, marble, face);
-    if (hasHeroDecision) {
+    if (heroDecisionLabel) {
         tileElement.append(createHeroDecisionMarker(heroDecisionLabel));
         tileElement.setAttribute('aria-label', `${tile}, ${heroDecisionLabel}`);
     }
     return tileElement;
+}
+
+function reusableHudTileBuckets() {
+    const buckets = new Map();
+    for (const tileElement of heroHand.children) {
+        const key = tileElement.dataset?.stableKey;
+        if (!key) continue;
+        const bucket = buckets.get(key) || [];
+        bucket.push(tileElement);
+        buckets.set(key, bucket);
+    }
+    return buckets;
+}
+
+function reconcileHeroHandTiles(tileConfigs) {
+    const reusableTiles = reusableHudTileBuckets();
+    const nextElements = tileConfigs.map(config => {
+        const key = hudTileStableKey(
+            config.tile,
+            config.extraClass,
+        );
+        const reused = reusableTiles.get(key)?.shift();
+        if (reused) {
+            return syncHudTileElement(
+                reused,
+                config.tile,
+                config.extraClass,
+                config.suggestions,
+                config.dealInRates,
+                config.heroDecisionLabel,
+            );
+        }
+        return createHudTile(
+            config.tile,
+            config.extraClass,
+            config.suggestions,
+            config.dealInRates,
+            config.heroDecisionLabel,
+        );
+    });
+
+    nextElements.forEach((tileElement, index) => {
+        if (heroHand.children[index] !== tileElement) {
+            heroHand.insertBefore(tileElement, heroHand.children[index] || null);
+        }
+    });
+
+    while (heroHand.children.length > nextElements.length) {
+        heroHand.lastElementChild.remove();
+    }
 }
 
 function createDoraBackTile() {
@@ -1158,32 +1306,30 @@ function renderHeroHand() {
     const heroDecisionKey = heroDecision
         ? `${heroDecision.type}:${heroDecision.tile}:${heroDecision.label}:${heroDecisionIndex}`
         : '';
-    const handKey = `${heroPlayer}:${roundIndex}:${turnIndex}:${tiles.join(',')}:${drawnTile || ''}:${suggestionKey}:${showDealInRates}:${dealInKey}:${heroDecisionKey}:${maxAiSuggestions}`;
+    const handKey = `${heroPlayer}:${tiles.join(',')}:${drawnTile || ''}:${suggestionKey}:${showDealInRates}:${dealInKey}:${heroDecisionKey}:${maxAiSuggestions}`;
     if (handKey === renderedHeroHandKey) return;
     renderedHeroHandKey = handKey;
     const suggestionsByIndex = suggestionsByTileIndex(tiles, drawnTile, visibleAiSuggestions);
     const dealInRatesByIndex = showDealInRates
         ? dealInRatesByTileIndex(tiles, drawnTile)
         : [...tiles, drawnTile].map(() => []);
-    const elements = tiles.map((tile, index) => (
-        createHudTile(
-            tile,
-            '',
-            suggestionsByIndex[index],
-            dealInRatesByIndex[index],
-            index === heroDecisionIndex ? heroDecision.label : '',
-        )
-    ));
+    const tileConfigs = tiles.map((tile, index) => ({
+        tile,
+        extraClass: '',
+        suggestions: suggestionsByIndex[index],
+        dealInRates: dealInRatesByIndex[index],
+        heroDecisionLabel: index === heroDecisionIndex ? heroDecision.label : '',
+    }));
     if (drawnTile) {
-        elements.push(createHudTile(
-            drawnTile,
-            'hud-tile--drawn',
-            suggestionsByIndex[tiles.length],
-            dealInRatesByIndex[tiles.length],
-            tiles.length === heroDecisionIndex ? heroDecision.label : '',
-        ));
+        tileConfigs.push({
+            tile: drawnTile,
+            extraClass: 'hud-tile--drawn',
+            suggestions: suggestionsByIndex[tiles.length],
+            dealInRates: dealInRatesByIndex[tiles.length],
+            heroDecisionLabel: tiles.length === heroDecisionIndex ? heroDecision.label : '',
+        });
     }
-    heroHand.replaceChildren(...elements);
+    reconcileHeroHandTiles(tileConfigs);
     updateHeroHandHoverClasses();
 }
 
@@ -1222,6 +1368,17 @@ function storedSfxVolume() {
     }
     if (!Number.isFinite(stored)) return DEFAULT_SFX_VOLUME;
     return Math.max(0, Math.min(100, Math.round(stored)));
+}
+
+function storedNavigationReplayDelay() {
+    let stored = NaN;
+    try {
+        stored = Number(localStorage.getItem(NAVIGATION_REPLAY_DELAY_STORAGE_KEY));
+    } catch {
+        stored = NaN;
+    }
+    if (!Number.isFinite(stored)) return DEFAULT_NAVIGATION_REPLAY_DELAY_MS;
+    return Math.max(0, Math.min(MAX_NAVIGATION_REPLAY_DELAY_MS, Math.round(stored)));
 }
 
 function soundKeyForAction(action) {
@@ -2120,39 +2277,75 @@ function hasDecisionState(state) {
         || (Array.isArray(state.actionDecision?.options) && state.actionDecision.options.length);
 }
 
-function decisionIndices() {
-    const states = rounds[roundIndex].turnStates || [];
+function decisionIndicesForRound(roundPosition) {
+    const states = rounds[roundPosition]?.turnStates || [];
     return states
         .map((state, index) => ({ state, index }))
         .filter(({ state }) => hasDecisionState(state))
         .map(({ index }) => index);
 }
 
+function decisionIndices() {
+    return decisionIndicesForRound(roundIndex);
+}
+
 function moveToIndexInList(indices, direction) {
+    const targetIndex = targetIndexInList(indices, direction);
+    if (!Number.isInteger(targetIndex)) return false;
+    selectTurn(targetIndex);
+    return true;
+}
+
+function targetIndexInList(indices, direction, currentTurnIndex = turnIndex) {
     if (!indices.length || !direction) return false;
-    const currentPosition = indices.findIndex(index => index >= turnIndex);
+    const currentPosition = indices.findIndex(index => index >= currentTurnIndex);
     let targetPosition;
     if (direction > 0) {
-        if (currentPosition < 0) return false;
-        targetPosition = currentPosition >= 0 && indices[currentPosition] === turnIndex
+        if (currentPosition < 0) return null;
+        targetPosition = currentPosition >= 0 && indices[currentPosition] === currentTurnIndex
             ? currentPosition + 1
             : Math.max(0, currentPosition);
     } else {
         if (currentPosition < 0) {
-            selectTurn(indices[indices.length - 1]);
-            return true;
+            return indices[indices.length - 1];
         }
-        targetPosition = currentPosition >= 0 && indices[currentPosition] === turnIndex
+        targetPosition = currentPosition >= 0 && indices[currentPosition] === currentTurnIndex
             ? currentPosition - 1
             : currentPosition - 1;
     }
-    if (targetPosition < 0 || targetPosition >= indices.length) return false;
-    selectTurn(indices[targetPosition]);
-    return true;
+    if (targetPosition < 0 || targetPosition >= indices.length) return null;
+    return indices[targetPosition];
+}
+
+function decisionTargetTurn(direction) {
+    const indices = decisionIndices();
+    if (!indices.length || !direction) return null;
+
+    if (direction > 0) {
+        const currentPosition = indices.findIndex(index => index >= turnIndex);
+        const isAtLastDecision = currentPosition === indices.length - 1
+            && indices[currentPosition] === turnIndex;
+        const isPastLastDecision = currentPosition < 0;
+
+        if (isAtLastDecision || isPastLastDecision) {
+            const lastTurnIndex = Math.max(0, (rounds[roundIndex].turnStates?.length || 1) - 1);
+            return turnIndex >= lastTurnIndex ? null : lastTurnIndex;
+        }
+    } else {
+        const firstDecisionIndex = indices[0];
+        if (turnIndex <= firstDecisionIndex) {
+            return turnIndex <= 0 ? null : 0;
+        }
+    }
+
+    return targetIndexInList(indices, direction);
 }
 
 function moveDecision(direction) {
-    return moveToIndexInList(decisionIndices(), direction);
+    const targetTurnIndex = decisionTargetTurn(direction);
+    if (!Number.isInteger(targetTurnIndex)) return false;
+    selectTurn(targetTurnIndex);
+    return true;
 }
 
 function bestProbability(items) {
@@ -2325,16 +2518,132 @@ function renderHeroSeatGrade() {
     heroSeatOverallGrade.textContent = `Overall: ${overallGrade?.grade || '-'}`;
 }
 
-function aiReviewDecisionIndices() {
-    const states = rounds[roundIndex].turnStates || [];
+function aiReviewDecisionIndicesForRound(roundPosition) {
+    const states = rounds[roundPosition]?.turnStates || [];
     return states
         .map((state, index) => ({ state, index }))
         .filter(({ state }) => aiReviewDelta(state) > aiReviewDeltaThreshold)
         .map(({ index }) => index);
 }
 
+function aiReviewDecisionIndices() {
+    return aiReviewDecisionIndicesForRound(roundIndex);
+}
+
 function moveAiReviewDecision(direction) {
     return moveToIndexInList(aiReviewDecisionIndices(), direction);
+}
+
+function aiReviewDecisionTargetTurn(direction) {
+    const indices = aiReviewDecisionIndices();
+    if (!indices.length || !direction) return null;
+
+    if (direction > 0) {
+        const currentPosition = indices.findIndex(index => index >= turnIndex);
+        const isAtLastDecision = currentPosition === indices.length - 1
+            && indices[currentPosition] === turnIndex;
+        const isPastLastDecision = currentPosition < 0;
+
+        if (isAtLastDecision || isPastLastDecision) {
+            const lastTurnIndex = Math.max(0, (rounds[roundIndex].turnStates?.length || 1) - 1);
+            return turnIndex >= lastTurnIndex ? null : lastTurnIndex;
+        }
+    } else {
+        const firstDecisionIndex = indices[0];
+        if (turnIndex <= firstDecisionIndex) {
+            return turnIndex <= 0 ? null : 0;
+        }
+    }
+
+    return targetIndexInList(indices, direction);
+}
+
+function cancelNavigationReplay() {
+    navigationReplayToken++;
+    if (navigationReplayTimer) {
+        clearTimeout(navigationReplayTimer);
+        navigationReplayTimer = null;
+    }
+}
+
+function selectTurnInRound(targetRoundIndex, targetTurnIndex, previousTimelinePosition = timelinePosition()) {
+    roundIndex = targetRoundIndex;
+    selectTurn(targetTurnIndex, { previousTimelinePosition });
+}
+
+function navigateToTurn(targetRoundIndex, targetTurnIndex) {
+    if (
+        !Number.isInteger(targetRoundIndex)
+        || !Number.isInteger(targetTurnIndex)
+        || !rounds[targetRoundIndex]?.turnStates?.length
+    ) {
+        return false;
+    }
+    if (targetRoundIndex === roundIndex && targetTurnIndex === turnIndex) return false;
+
+    cancelNavigationReplay();
+    const previousTimelinePosition = timelinePosition();
+    const targetTimelinePosition = timelinePosition(targetRoundIndex, targetTurnIndex);
+    const wrapsToEarlierRound = targetRoundIndex !== roundIndex
+        && targetTimelinePosition < previousTimelinePosition;
+
+    if (
+        navigationReplayDelay <= 0
+        || targetTimelinePosition === previousTimelinePosition
+        || wrapsToEarlierRound
+    ) {
+        selectTurnInRound(targetRoundIndex, targetTurnIndex, previousTimelinePosition);
+        render();
+        return true;
+    }
+
+    const direction = targetTimelinePosition > previousTimelinePosition ? 1 : -1;
+    const token = navigationReplayToken;
+    const step = () => {
+        if (token !== navigationReplayToken) return;
+        if (roundIndex === targetRoundIndex && turnIndex === targetTurnIndex) {
+            navigationReplayTimer = null;
+            return;
+        }
+        if (!moveTurn(direction)) {
+            selectTurnInRound(targetRoundIndex, targetTurnIndex, timelinePosition());
+        }
+        render();
+        if (roundIndex === targetRoundIndex && turnIndex === targetTurnIndex) {
+            navigationReplayTimer = null;
+            return;
+        }
+        navigationReplayTimer = setTimeout(step, navigationReplayDelay);
+    };
+
+    navigationReplayTimer = setTimeout(step, navigationReplayDelay);
+    return true;
+}
+
+function navigateDecision(direction) {
+    const targetTurnIndex = decisionTargetTurn(direction);
+    if (!Number.isInteger(targetTurnIndex)) return false;
+    return navigateToTurn(roundIndex, targetTurnIndex);
+}
+
+function navigateAiReviewDecision(direction) {
+    const targetTurnIndex = aiReviewDecisionTargetTurn(direction);
+    if (!Number.isInteger(targetTurnIndex)) return false;
+    return navigateToTurn(roundIndex, targetTurnIndex);
+}
+
+function navigateToNextRoundDecision(indicesForRound) {
+    if (rounds.length <= 1) return false;
+
+    for (let offset = 1; offset < rounds.length; offset++) {
+        const targetRoundIndex = (roundIndex + offset) % rounds.length;
+        const indices = indicesForRound(targetRoundIndex);
+        if (!indices.length) continue;
+
+        return navigateToTurn(targetRoundIndex, indices[0]);
+    }
+
+    return false;
 }
 
 function windName(wind) {
@@ -2801,6 +3110,24 @@ function syncSfxVolumeFromInput({ persist = true } = {}) {
     }
 }
 
+function syncNavigationReplayDelayFromInput({ persist = true } = {}) {
+    navigationReplayDelay = Math.round(clampNumber(
+        navigationReplayDelayInput.value,
+        0,
+        MAX_NAVIGATION_REPLAY_DELAY_MS,
+        navigationReplayDelay,
+    ));
+    navigationReplayDelayInput.value = String(navigationReplayDelay);
+    navigationReplayDelayOutput.value = navigationReplayDelay > 0
+        ? `${navigationReplayDelay} ms`
+        : 'Instant';
+    if (persist) {
+        try {
+            localStorage.setItem(NAVIGATION_REPLAY_DELAY_STORAGE_KEY, String(navigationReplayDelay));
+        } catch {}
+    }
+}
+
 function syncReviewSettingsFromInputs() {
     dealInMode = dealInModeSelect.value;
     aiScoreMode = aiScoreModeSelect.value;
@@ -3156,6 +3483,9 @@ function render() {
 
 sfxVolumeInput.value = String(sfxVolume);
 syncSfxVolumeFromInput({ persist: false });
+navigationReplayDelayInput.value = String(navigationReplayDelay);
+syncNavigationReplayDelayFromInput({ persist: false });
+preloadTileFaceImages();
 preloadAudioBuffers();
 
 document.addEventListener('pointerdown', warmAudioOnce, { capture: true, once: true });
@@ -3188,6 +3518,7 @@ window.addEventListener('resize', scaleHeroHudToCanvas);
 window.visualViewport?.addEventListener('resize', scaleHeroHudToCanvas);
 previousRoundButton.addEventListener('click', event => {
     if (consumeRoundResultInteraction(event)) return;
+    cancelNavigationReplay();
     const previousTimelinePosition = timelinePosition();
     roundIndex = (roundIndex - 1 + rounds.length) % rounds.length;
     selectTurn(0, { previousTimelinePosition });
@@ -3195,6 +3526,7 @@ previousRoundButton.addEventListener('click', event => {
 });
 nextRoundButton.addEventListener('click', event => {
     if (consumeRoundResultInteraction(event)) return;
+    cancelNavigationReplay();
     const previousTimelinePosition = timelinePosition();
     roundIndex = (roundIndex + 1) % rounds.length;
     selectTurn(0, { previousTimelinePosition });
@@ -3202,6 +3534,7 @@ nextRoundButton.addEventListener('click', event => {
 });
 navPreviousRoundButton.addEventListener('click', event => {
     if (consumeRoundResultInteraction(event)) return;
+    cancelNavigationReplay();
     const previousTimelinePosition = timelinePosition();
     roundIndex = (roundIndex - 1 + rounds.length) % rounds.length;
     selectTurn(0, { previousTimelinePosition });
@@ -3209,6 +3542,7 @@ navPreviousRoundButton.addEventListener('click', event => {
 });
 navNextRoundButton.addEventListener('click', event => {
     if (consumeRoundResultInteraction(event)) return;
+    cancelNavigationReplay();
     const previousTimelinePosition = timelinePosition();
     roundIndex = (roundIndex + 1) % rounds.length;
     selectTurn(0, { previousTimelinePosition });
@@ -3216,27 +3550,29 @@ navNextRoundButton.addEventListener('click', event => {
 });
 previousTurnButton.addEventListener('click', event => {
     if (consumeRoundResultInteraction(event)) return;
+    cancelNavigationReplay();
     if (moveTurn(-1)) render();
 });
 nextTurnButton.addEventListener('click', event => {
     if (consumeRoundResultInteraction(event)) return;
+    cancelNavigationReplay();
     if (moveTurn(1)) render();
 });
 navPreviousTurnButton.addEventListener('click', event => {
     if (consumeRoundResultInteraction(event)) return;
-    if (moveDecision(-1)) render();
+    navigateDecision(-1);
 });
 navNextTurnButton.addEventListener('click', event => {
     if (consumeRoundResultInteraction(event)) return;
-    if (moveDecision(1)) render();
+    navigateDecision(1);
 });
 navPreviousAiReviewButton.addEventListener('click', event => {
     if (consumeRoundResultInteraction(event)) return;
-    if (moveAiReviewDecision(-1)) render();
+    navigateAiReviewDecision(-1);
 });
 navNextAiReviewButton.addEventListener('click', event => {
     if (consumeRoundResultInteraction(event)) return;
-    if (moveAiReviewDecision(1)) render();
+    navigateAiReviewDecision(1);
 });
 roundResultOverlay.addEventListener('click', event => {
     consumeRoundResultInteraction(event);
@@ -3269,17 +3605,63 @@ aiScoreModeSelect.addEventListener('change', syncReviewSettingsFromInputs);
 maxAiSuggestionsInput.addEventListener('change', syncReviewSettingsFromInputs);
 diffToleranceInput.addEventListener('change', syncReviewSettingsFromInputs);
 sfxVolumeInput.addEventListener('input', syncSfxVolumeFromInput);
+navigationReplayDelayInput.addEventListener('input', syncNavigationReplayDelayFromInput);
 document.addEventListener('click', event => {
     if (userNavDock.contains(event.target)) return;
     if (!aiReviewSettings.hidden) closeAiReviewSettings();
     if (!appSettings.hidden) closeAppSettings();
 });
+
+function isEditableKeyboardTarget(target) {
+    if (!(target instanceof HTMLElement)) return false;
+    const tagName = target.tagName;
+    return target.isContentEditable
+        || tagName === 'INPUT'
+        || tagName === 'SELECT'
+        || tagName === 'TEXTAREA';
+}
+
+function arrowNavigationKind(key) {
+    if (key === 'ArrowRight' || key === 'ArrowLeft') return 'decision';
+    if (key === 'ArrowUp' || key === 'ArrowDown') return 'aiReview';
+    return '';
+}
+
 document.addEventListener('keydown', event => {
-    if (consumeRoundResultInteraction(event)) return;
+    const navigationKind = arrowNavigationKind(event.key);
+    if (roundResultVisible && navigationKind) {
+        event.preventDefault();
+        event.stopPropagation();
+        hideRoundResultOverlay();
+        const moved = navigationKind === 'aiReview'
+            ? navigateToNextRoundDecision(aiReviewDecisionIndicesForRound)
+            : navigateToNextRoundDecision(decisionIndicesForRound);
+        if (!moved) render();
+        return;
+    } else if (consumeRoundResultInteraction(event)) {
+        return;
+    }
+
     if (event.key === 'Escape') {
         if (!aiReviewSettings.hidden) closeAiReviewSettings();
         if (!appSettings.hidden) closeAppSettings();
+        return;
     }
+    if (isEditableKeyboardTarget(event.target)) return;
+
+    if (event.key === 'ArrowRight') {
+        navigateDecision(1);
+    } else if (event.key === 'ArrowLeft') {
+        navigateDecision(-1);
+    } else if (event.key === 'ArrowUp') {
+        navigateAiReviewDecision(1);
+    } else if (event.key === 'ArrowDown') {
+        navigateAiReviewDecision(-1);
+    } else {
+        return;
+    }
+
+    event.preventDefault();
 });
 document.addEventListener('wheel', event => {
     if (event.deltaY === 0) return;
@@ -3289,6 +3671,7 @@ document.addEventListener('wheel', event => {
         return;
     }
     event.preventDefault();
+    cancelNavigationReplay();
     if (moveTurn(-Math.sign(event.deltaY))) render();
 }, { passive: false });
 canvas.addEventListener('mousemove', event => {

@@ -161,6 +161,13 @@ body {
     flex: none;
 }
 
+.hud-tile::before {
+    content: "";
+    position: absolute;
+    z-index: 1;
+    inset: -28px 0 0;
+}
+
 .hud-tile__suggestions {
     position: absolute;
     z-index: 6;
@@ -295,7 +302,7 @@ body {
 .hud-tile__face,
 .hud-tile__suggestions,
 .hud-tile__hero-decision {
-    will-change: transform;
+    backface-visibility: hidden;
 }
 
 .hud-tile:hover > .hud-tile__top,
@@ -811,7 +818,7 @@ body {
 
 .app-settings__volume-control {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 34px;
+    grid-template-columns: minmax(0, 1fr) 50px;
     align-items: center;
     gap: 8px;
 }
