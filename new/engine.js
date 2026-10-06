@@ -7,6 +7,7 @@ import {
     Vec3,
     WebGLRenderer,
 } from './engine-core.js?v=58';
+import { calculateReportGrade, calculateReviewGrade, formatReviewGrade } from './review-rating.mjs?v=60';
 
 const canvas = document.querySelector('#table-canvas');
 const decalCanvas = document.querySelector('#decal-canvas');
@@ -72,8 +73,7 @@ const SFX_VOLUME_STORAGE_KEY = 'killer-mortal-sfx-volume';
 const DEFAULT_NAVIGATION_REPLAY_DELAY_MS = 0;
 const MAX_NAVIGATION_REPLAY_DELAY_MS = 250;
 const NAVIGATION_REPLAY_DELAY_STORAGE_KEY = 'killer-mortal-navigation-replay-delay';
-const ENGINE_DEBUG_VERSION = 'grade-full-details-v58';
-const GRADE_DEBUG = false;
+const ENGINE_DEBUG_VERSION = 'mortal-rating-v60';
 const SFX_SOURCES = {
     chi: '/media/sfx/chii_f.mp3',
     pon: '/media/sfx/pon_f.mp3',
@@ -109,7 +109,6 @@ let audioWarmupStarted = false;
 let audioContext = null;
 const audioBuffers = new Map();
 const audioBufferPromises = new Map();
-const loggedGradeDebugKeys = new Set();
 const TABLE_SIZE_SCALE = 1.1;
 const TILE_SIZE_SCALE = .90;
 const HUD_TILE_SIZE_SCALE = .9;
@@ -469,6 +468,7 @@ const defaultRound = {
 };
 let round = defaultRound;
 let rounds = [defaultRound];
+let overallReviewGrade = null;
 let roundIndex = 0;
 let turnIndex = 0;
 let heroPlayer = 0;
@@ -1873,40 +1873,16 @@ function calculateDangerRates(dangerState) {
 
 const DECISION_ACTION_TYPES = ['chi', 'pon', 'daiminkan', 'ankan', 'hora', 'reach'];
 
-function withReviewKeys(reviewEntries) {
+function withReviewKeys(reviewEntries, reviewRoundIndex) {
     return (reviewEntries || []).map((entry, index) => ({
         ...entry,
-        _reviewKey: String(index),
+        // Entries restart at zero each round; overall grading spans all rounds.
+        _reviewKey: `${reviewRoundIndex}:${index}`,
     }));
 }
 
 function reviewEntryKey(entry) {
     return entry?._reviewKey || '';
-}
-
-function actionMatchesActual(action, actual) {
-    if (!action || !actual) return false;
-    const actionTile = action.pai || null;
-    const actualTile = actual.pai || null;
-    return action.type === actual.type
-        && (actionTile === actualTile || sameTileKind(actionTile, actualTile))
-        && JSON.stringify(action.consumed || []) === JSON.stringify(actual.consumed || []);
-}
-
-function reviewEntryGradeStats(entry) {
-    const details = entry?.details || [];
-    const finiteDetails = details.filter(detail => Number.isFinite(detail.prob));
-    if (!finiteDetails.length) return null;
-    const bestProbability = finiteDetails.reduce((best, detail) => Math.max(best, detail.prob), 0);
-    const actualDetail = Number.isInteger(entry.actual_index)
-        ? details[entry.actual_index]
-        : finiteDetails.find(detail => actionMatchesActual(detail.action, entry.actual || { type: 'none' }));
-    const playerProbability = Number.isFinite(actualDetail?.prob) ? actualDetail.prob : 0;
-    return {
-        bestProbability,
-        playerProbability,
-        regret: Math.max(0, bestProbability - playerProbability),
-    };
 }
 
 function isTileSuggestionDecision(entry) {
@@ -2034,7 +2010,7 @@ function isNonHeroCallOfDiscard(callEvent, discardEvent) {
         && callEvent.target === discardEvent?.actor;
 }
 
-function buildTurnStates(startEvent, events, reviewEntries = []) {
+function buildTurnStates(startEvent, events, reviewEntries = [], reviewRoundIndex = 0) {
     const hands = Array.from(
         { length: 4 },
         (_, actor) => [...(startEvent.tehais?.[actor] || [])],
@@ -2065,7 +2041,7 @@ function buildTurnStates(startEvent, events, reviewEntries = []) {
         doraIndicators: [...doraIndicators],
         dangerRates: [],
     }];
-    const keyedReviewEntries = withReviewKeys(reviewEntries);
+    const keyedReviewEntries = withReviewKeys(reviewEntries, reviewRoundIndex);
     const pendingDecisions = keyedReviewEntries.filter(isActionDecision);
     const pendingTileSuggestionDecisions = keyedReviewEntries.filter(isTileSuggestionDecision);
     let pendingSettledDiscardSound = false;
@@ -2172,7 +2148,6 @@ function buildTurnStates(startEvent, events, reviewEntries = []) {
                 const decisionState = states[states.length - 1];
                 decisionState.aiSuggestions = tileSuggestions(entry);
                 decisionState.aiReviewKey = reviewEntryKey(entry);
-                decisionState.aiReviewGrade = reviewEntryGradeStats(entry);
                 if (entry.actual?.type === 'dahai') {
                     decisionState.heroDecision = {
                         type: 'dahai',
@@ -2197,7 +2172,6 @@ function buildTurnStates(startEvent, events, reviewEntries = []) {
                         : event.pai,
                 });
                 decisionState.aiReviewKey = reviewEntryKey(entry);
-                decisionState.aiReviewGrade = reviewEntryGradeStats(entry);
             }
             if (event.actor === heroPlayer && event.type === 'dahai') {
                 const isRiichiDiscard = riichiDiscardIndices[heroPlayer] === discards[heroPlayer].length - 1;
@@ -2221,7 +2195,6 @@ function buildTurnStates(startEvent, events, reviewEntries = []) {
                     options,
                     selectedIndex,
                     reviewKey: reviewEntryKey(entry),
-                    reviewGrade: reviewEntryGradeStats(entry),
                 };
                 if (isDiscardReaction && selectedAction?.type === 'none') {
                     pendingSettledDiscardSound = true;
@@ -2388,136 +2361,20 @@ function aiReviewDelta(state) {
     return Math.max(tileDelta, actionDelta);
 }
 
-function matchGrade(score) {
-    if (score >= 97) return 'S+';
-    if (score >= 94) return 'S';
-    if (score >= 90) return 'S-';
-    if (score >= 87) return 'A+';
-    if (score >= 84) return 'A';
-    if (score >= 80) return 'A-';
-    if (score >= 77) return 'B+';
-    if (score >= 74) return 'B';
-    if (score >= 70) return 'B-';
-    if (score >= 67) return 'C+';
-    if (score >= 64) return 'C';
-    if (score >= 60) return 'C-';
-    if (score >= 50) return 'D';
-    return 'F';
-}
-
-function formatDebugPercent(value) {
-    return Number.isFinite(value) ? `${(value * 100).toFixed(2)}%` : '-';
-}
-
-function debugGradeCalculation(label, result, rows) {
-    if (!GRADE_DEBUG) return;
-    const debugKey = [
-        ENGINE_DEBUG_VERSION,
-        label,
-        result?.reviewedDecisions ?? 0,
-        result?.grade ?? '-',
-        result?.score?.toFixed?.(2) ?? '-',
-        rows.map(row => `${row.stateIndex}:${row.reviewKey}:${row.status}:${row.regret}`).join('|'),
-    ].join('::');
-    if (loggedGradeDebugKeys.has(debugKey)) return;
-    loggedGradeDebugKeys.add(debugKey);
-    console.log(`[GradeDebug] ${label}`, {
-        reviewedDecisions: result?.reviewedDecisions ?? 0,
-        totalRegret: result?.totalRegret ?? 0,
-        averageRegret: result?.averageRegret ?? 0,
-        score: result?.score ?? null,
-        grade: result?.grade ?? null,
-    });
-    console.table(rows);
-}
-
-function calculateGradeForStates(states, label = 'grade') {
-    const stateList = states || [];
-    const countedReviewKeys = new Set();
-    let reviewedDecisions = 0;
-    let totalRegret = 0;
-    const debugRows = [];
-    for (const [stateIndex, state] of stateList.entries()) {
-        const hasTileReview = Boolean(state.heroDecision) && Array.isArray(state.aiSuggestions) && state.aiSuggestions.length;
-        const hasActionReview = Array.isArray(state.actionDecision?.options)
-            && state.actionDecision.options.some(action => (
-                Number.isFinite(action?._probability) || Number.isFinite(action?.probability)
-            ));
-        const reviewKey = state.aiReviewKey || state.actionDecision?.reviewKey || '';
-        const gradeStats = state.aiReviewGrade || state.actionDecision?.reviewGrade || null;
-        const tileDelta = hasTileReview ? (
-            bestProbability(state.aiSuggestions) - heroTileDecisionProbability(state)
-        ) : 0;
-        const actionDelta = hasActionReview ? (
-            bestProbability(state.actionDecision.options) - heroActionDecisionProbability(state)
-        ) : 0;
-        const stateRegret = gradeStats?.regret;
-        const debugRow = {
-            stateIndex,
-            reviewKey,
-            event: state.event?.type || '',
-            actor: Number.isInteger(state.event?.actor) ? state.event.actor : '',
-            tile: state.event?.pai || state.heroDecision?.tile || '',
-            hasTileReview: Boolean(hasTileReview),
-            hasActionReview: Boolean(hasActionReview),
-            tileDelta: formatDebugPercent(tileDelta),
-            actionDelta: formatDebugPercent(actionDelta),
-            bestProbability: formatDebugPercent(gradeStats?.bestProbability),
-            playerProbability: formatDebugPercent(gradeStats?.playerProbability),
-            regret: formatDebugPercent(stateRegret),
-            status: 'counted',
-        };
-        if (!gradeStats) {
-            debugRow.status = 'skip:no-review';
-            debugRows.push(debugRow);
-            continue;
-        }
-        if (reviewKey && countedReviewKeys.has(reviewKey)) {
-            debugRow.status = 'skip:duplicate-review-key';
-            debugRows.push(debugRow);
-            continue;
-        }
-        if (!Number.isFinite(stateRegret)) {
-            debugRow.status = 'skip:non-finite-regret';
-            debugRows.push(debugRow);
-            continue;
-        }
-        if (reviewKey) countedReviewKeys.add(reviewKey);
-        reviewedDecisions++;
-        totalRegret += Math.max(0, stateRegret);
-        debugRows.push(debugRow);
-    }
-    if (!reviewedDecisions) {
-        debugGradeCalculation(label, null, debugRows);
-        return null;
-    }
-    const averageRegret = totalRegret / reviewedDecisions;
-    const score = Math.max(0, Math.min(100, 100 - averageRegret * 180));
-    const result = {
-        reviewedDecisions,
-        totalRegret,
-        averageRegret,
-        score,
-        grade: matchGrade(score),
-    };
-    debugGradeCalculation(label, result, debugRows);
-    return result;
-}
-
 function calculateRoundGrade(roundItem) {
-    return calculateGradeForStates(roundItem?.turnStates || [], `round ${roundIndex + 1}`);
+    return roundItem?.reviewGrade || null;
 }
 
 function calculateOverallGrade() {
-    return calculateGradeForStates(rounds.flatMap(roundItem => roundItem.turnStates || []), 'overall');
+    return overallReviewGrade;
 }
 
 function renderHeroSeatGrade() {
     if (!heroSeatRoundGrade || !heroSeatOverallGrade) return;
     const currentRoundGrade = calculateRoundGrade(rounds[roundIndex]);
     const overallGrade = calculateOverallGrade();
-    heroSeatRoundGrade.textContent = `Round: ${currentRoundGrade?.grade || '-'}`;
-    heroSeatOverallGrade.textContent = `Overall: ${overallGrade?.grade || '-'}`;
+    heroSeatRoundGrade.textContent = `Round: ${formatReviewGrade(currentRoundGrade)}`;
+    heroSeatOverallGrade.textContent = `Overall: ${formatReviewGrade(overallGrade)}`;
 }
 
 function aiReviewDecisionIndicesForRound(roundPosition) {
@@ -3210,6 +3067,7 @@ async function loadRound() {
         const response = await fetch(resolveReplaySource(file), { cache: 'no-store' });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
+        overallReviewGrade = calculateReportGrade(data.review);
         if (Number.isInteger(data.player_id) && data.player_id >= 0 && data.player_id < 4) {
             heroPlayer = data.player_id;
         }
@@ -3231,11 +3089,13 @@ async function loadRound() {
                     ...defaultRound,
                     ...event,
                     remainingTiles: getInitialRemainingTiles(event),
+                    reviewGrade: calculateReviewGrade(reviewRound?.entries || []),
                 };
                 replayRound.turnStates = buildTurnStates(
                     event,
                     turnEvents,
                     reviewRound?.entries || [],
+                    replayRoundIndex,
                 );
                 attachRoundResultToTerminalState(
                     replayRound.turnStates,
