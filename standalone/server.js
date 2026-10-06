@@ -68,8 +68,9 @@ function validateReportUrl(value) {
 
     const reportUrl = new URL(value);
     if (
-        reportUrl.protocol !== 'https:'
-        || reportUrl.hostname !== 'mjai.ekyu.moe'
+        reportUrl.origin !== 'https://mjai.ekyu.moe'
+        || reportUrl.username
+        || reportUrl.password
         || !/^\/report\/[A-Za-z0-9_-]+\.json$/.test(reportUrl.pathname)
     ) {
         throw new Error('Only https://mjai.ekyu.moe/report/*.json is allowed.');
@@ -90,6 +91,7 @@ async function proxyReport(requestUrl, response) {
     try {
         const upstream = await fetch(reportUrl, {
             headers: { Accept: 'application/json' },
+            redirect: 'error',
         });
         const body = Buffer.from(await upstream.arrayBuffer());
         send(response, upstream.status, body, {
@@ -104,6 +106,11 @@ async function proxyReport(requestUrl, response) {
 
 async function route(request, response) {
     const requestUrl = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
+    // Reject foreign Host headers so a website cannot rebind its domain to this server.
+    if (!['localhost', '127.0.0.1'].includes(requestUrl.hostname)) {
+        send(response, 403, 'Forbidden', { 'Content-Type': 'text/plain; charset=utf-8' });
+        return;
+    }
     const pathname = requestUrl.pathname;
 
     if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -179,6 +186,6 @@ const server = http.createServer((request, response) => {
     });
 });
 
-server.listen(port, () => {
+server.listen(port, '127.0.0.1', () => {
     console.log(`Killer Mortal standalone running at http://localhost:${port}`);
 });

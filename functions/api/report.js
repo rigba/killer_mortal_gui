@@ -13,8 +13,9 @@ function validateReportUrl(value) {
 
     const reportUrl = new URL(value);
     if (
-        reportUrl.protocol !== 'https:'
-        || reportUrl.hostname !== 'mjai.ekyu.moe'
+        reportUrl.origin !== 'https://mjai.ekyu.moe'
+        || reportUrl.username
+        || reportUrl.password
         || !/^\/report\/[A-Za-z0-9_-]+\.json$/.test(reportUrl.pathname)
     ) {
         throw new Error('Only https://mjai.ekyu.moe/report/*.json is allowed.');
@@ -35,6 +36,7 @@ export async function onRequestGet({ request }) {
     try {
         const upstream = await fetch(reportUrl, {
             headers: { Accept: 'application/json' },
+            redirect: 'error',
         });
 
         return new Response(upstream.body, {

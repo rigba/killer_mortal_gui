@@ -10,7 +10,7 @@ function normalizeReportUrl(value) {
         throw new Error('Enter a full mjai.ekyu.moe URL.');
     }
 
-    if (sourceUrl.hostname !== 'mjai.ekyu.moe') {
+    if (sourceUrl.origin !== 'https://mjai.ekyu.moe' || sourceUrl.username || sourceUrl.password) {
         throw new Error('Only mjai.ekyu.moe review URLs are supported.');
     }
 
@@ -21,8 +21,9 @@ function normalizeReportUrl(value) {
     }
 
     if (
-        reportUrl.protocol !== 'https:'
-        || reportUrl.hostname !== 'mjai.ekyu.moe'
+        reportUrl.origin !== 'https://mjai.ekyu.moe'
+        || reportUrl.username
+        || reportUrl.password
         || !/^\/report\/[A-Za-z0-9_-]+\.json$/.test(reportUrl.pathname)
     ) {
         throw new Error('The URL must point to an mjai report JSON.');
